@@ -25,14 +25,4 @@ public class BcryptTest {
                 "$2a$14$9axC8akAGUXV0N4f/BMoleuCx8IU5zerF5s/m/gkXT4CraEJ5ywBS"));
 
     }
-
-
-    @Test
-    public void testRng() {
-        Random r = new Random();
-        IntStream stream = r.ints(100, 1, 4);
-
-        stream.forEach(System.out::println);
-
-    }
 }

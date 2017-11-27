@@ -1,18 +1,20 @@
 package com.currencycloud.auth.service;
 
 import com.currencycloud.auth.dao.ContactsCstmRepository;
+import com.currencycloud.auth.events.AmqpRegistry;
+import com.currencycloud.auth.events.auth.FailedLogin;
 import com.currencycloud.auth.exception.DataAccessException;
 import com.currencycloud.auth.model.AuthenticationResponse;
 import com.currencycloud.auth.model.db.Account;
 import com.currencycloud.auth.model.db.AccountCstm;
 import com.currencycloud.auth.model.db.Contact;
 import com.currencycloud.auth.model.db.ContactsCstm;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 
 @Service
 public class AuthenticationService {
@@ -20,24 +22,22 @@ public class AuthenticationService {
     public static final String DENIED_INVALID_SUPPLIED_CREDENTIALS = "invalid_supplied_credentials";
     public static final String DENIED_CONTACT_LOCKED = "contact_locked";
     public static final String DENIED_CONTACT_NOT_PERMISSIONED = "contact_not_permissioned";
-    public static final String DENIED_ACCOUNT_INACTIVE = "account_inactive";
 
-    public static final String[] SECURITY_QUESTIONS = {
-            "sec_q_fav_animal",
-            "sec_q_fav_city",
-            "sec_q_hol_dst",
-            "sec_q_pet_name"
-    };
+    public static final String TRADING = "trading";
+    public static final String BACK_OFFICE = "back_office";
 
     @Autowired
     private ContactsCstmRepository cstmRepository;
+
+    @Autowired
+    private RabbitTemplate rabbitTemplate;
 
     public AuthenticationService(){
 
     }
 
     /*
-    * Attempt to authenticate against the db
+    * Attempt to authenticate against the db with the nominated permission
     */
     public Map<String,Object> authenticate(String loginId, String password, int q_no, String answer, String permission) throws DataAccessException {
         ContactsCstm cstm = cstmRepository.findByLoginId(loginId);
@@ -49,7 +49,7 @@ public class AuthenticationService {
 
         Contact contact = cstm.getContact();
 
-        // verify the contact is not locked
+        // verify the contact is not locked - do not perform any further checks if the contact is locked.
         if(cstm.isLocked()) {
             return generateFailedResponse(loginId, DENIED_CONTACT_LOCKED, "Access denied, contact locked")
                     .getResponseData();
@@ -59,11 +59,10 @@ public class AuthenticationService {
 
         // Check permissions for the contact
         // trading or compliance upload must be enabled
-        AuthenticationResponse response =  assertPermissionEnabled(contact, cstm, account, "trading");
-        AuthenticationResponse complianceResponse = null;
+        AuthenticationResponse response =  assertPermissionEnabled(contact, cstm, account, permission);
         if(response.isFailed()) {
             // trading is not enabled
-            complianceResponse = assertComplianceUploadEnabled(cstm, account);
+            AuthenticationResponse complianceResponse = assertComplianceUploadEnabled(cstm, account);
             if(complianceResponse.isFailed()) {
                 // trading is not enabled and this account is not in a compliance processing pre-enabled state therefore abort.
                 return response.getResponseData();
@@ -77,7 +76,7 @@ public class AuthenticationService {
         }
 
         // Check the security answer is correct
-        response = assertSecurityQuestionCorrect(q_no, answer, cstm);
+        response = assertSecurityQuestionCorrect(q_no, answer, contact, cstm);
         if(response.isFailed()) {
             return response.getResponseData();
         }
@@ -117,7 +116,7 @@ public class AuthenticationService {
             return response.getResponseData();
         }
 
-        response = assertApiKeyCorrect(apiKey, cstm);
+        response = assertApiKeyCorrect(apiKey, contact, cstm);
         if(response.isFailed()) {
             return response.getResponseData();
         }
@@ -207,18 +206,19 @@ public class AuthenticationService {
         body.put("last_name", contact.getLastName());
         body.put("session_duration", acstm.getOnlineSessionDuration());
         body.put("broker", cstm.getBrokerPermissions());
+        body.put("last_successful_login", cstm.getLastSuccessfulAttempt());
 
         return AuthenticationResponse.successful(body);
     }
 
     public AuthenticationResponse assertPermissionEnabled(Contact contact, ContactsCstm cstm, Account account, String permission)  {
         switch(permission) {
-            case "trading":
+            case TRADING:
                 if (!cstm.isTradingEnabled()) {
                     return generateFailedResponse(cstm.getLoginId(), DENIED_CONTACT_NOT_PERMISSIONED, "Contact is not enabled for trading");
                 }
                 break;
-            case "back_office":
+            case BACK_OFFICE:
                 if (!cstm.isBackOfficeLoginEnabled()) {
                     return generateFailedResponse(cstm.getLoginId(), DENIED_CONTACT_NOT_PERMISSIONED, "Contact is not enabled for back_office");
                 }
@@ -259,14 +259,16 @@ public class AuthenticationService {
     * */
     public AuthenticationResponse assertPasswordCorrect(String password, Contact contact, ContactsCstm cstm) {
         if(!cstm.assertPasswordHashMatches(password)) {
+            generateFailedLoginEvent(contact, cstm, FailedLogin.Reason.INCORRECT_PASSWORD);
             return generateFailedResponse(cstm.getLoginId(), DENIED_INVALID_SUPPLIED_CREDENTIALS, "Access denied, incorrect credentials");
         }
 
         return AuthenticationResponse.pass();
     }
 
-    public AuthenticationResponse assertApiKeyCorrect(String apiKey, ContactsCstm cstm) {
+    public AuthenticationResponse assertApiKeyCorrect(String apiKey, Contact contact, ContactsCstm cstm) {
         if(!cstm.assertApiKeyMatches(apiKey)) {
+            generateFailedLoginEvent(contact, cstm, FailedLogin.Reason.INCORRECT_API_KEY);
             return generateFailedResponse(cstm.getLoginId(), DENIED_INVALID_SUPPLIED_CREDENTIALS, "Access denied, incorrect credentials");
         }
 
@@ -276,13 +278,23 @@ public class AuthenticationService {
     /*
     * Verify that the bcrypted security answer matches what we have in our database
     */
-    public AuthenticationResponse assertSecurityQuestionCorrect(int questionNumber, String answer,  ContactsCstm cstm) {
+    public AuthenticationResponse assertSecurityQuestionCorrect(int questionNumber, String answer, Contact contact, ContactsCstm cstm) {
         if(!cstm.assertSecurityAnswer(questionNumber, answer)) {
+            generateFailedLoginEvent(contact, cstm, FailedLogin.Reason.INCORRECT_SECURITY_ANSWER);
             return generateFailedResponse(cstm.getLoginId(), DENIED_INVALID_SUPPLIED_CREDENTIALS, "Access denied, incorrect credentials");
         }
 
         return AuthenticationResponse.pass();
     }
 
+
+    private void generateFailedLoginEvent(Contact contact, ContactsCstm cstm, FailedLogin.Reason reason) {
+        // deliver an amqp ping to all auth.failed queues for pickup
+        rabbitTemplate.convertAndSend(
+                AmqpRegistry.EXCHANGE_NAME_AUTHENTICATION,
+                "auth.failed",
+                new FailedLogin(cstm, Calendar.getInstance().getTime(), reason)
+        );
+    }
 
 }
