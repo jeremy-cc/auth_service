@@ -1,13 +1,10 @@
 package com.currencycloud.auth.events.auth;
 
-import com.currencycloud.auth.model.db.Contact;
 import com.currencycloud.auth.model.db.ContactsCstm;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.format.datetime.DateFormatter;
-import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 
 import java.util.Date;
-import java.util.Locale;
 
 public class FailedLogin {
 

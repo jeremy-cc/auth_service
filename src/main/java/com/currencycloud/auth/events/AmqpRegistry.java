@@ -24,6 +24,9 @@ public class AmqpRegistry {
     }
 
     @Bean
+    public Queue getSuccessfulLoginQueue() { return new Queue( "successful_login"); }
+
+    @Bean
     public TopicExchange getAuthExchange() {
         return new TopicExchange(EXCHANGE_NAME_AUTHENTICATION);
     }
@@ -38,21 +41,9 @@ public class AmqpRegistry {
         return BindingBuilder.bind(getLockContactEventQueue()).to(getAuthExchange()).with("auth.failed.#");
     }
 
-//    @Autowired
-//    private ConnectionFactory connectionFactory;
-//
-//    // base level configuration
-//    @Bean
-//    public RabbitTemplate rabbitTemplate() {
-//        RabbitTemplate template = new RabbitTemplate(connectionFactory);
-//        template.setMessageConverter(jsonMessageConverter());
-//        configureRabbitTemplate(template);
-//        return template;
-//    }
-//
-//    @Bean
-//    public MessageConverter jsonMessageConverter() {
-//        return new Jackson2JsonMessageConverter();
-//    }
+    @Bean
+    public Binding getSuccessfulLoginBinding() {
+        return BindingBuilder.bind(getSuccessfulLoginQueue()).to(getAuthExchange()).with("auth.success.#");
+    }
 
 }

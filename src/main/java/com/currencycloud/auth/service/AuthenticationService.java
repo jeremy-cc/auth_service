@@ -3,13 +3,13 @@ package com.currencycloud.auth.service;
 import com.currencycloud.auth.dao.ContactsCstmRepository;
 import com.currencycloud.auth.events.AmqpRegistry;
 import com.currencycloud.auth.events.auth.FailedLogin;
+import com.currencycloud.auth.events.auth.SuccessfulLogin;
 import com.currencycloud.auth.exception.DataAccessException;
 import com.currencycloud.auth.model.AuthenticationResponse;
 import com.currencycloud.auth.model.db.Account;
 import com.currencycloud.auth.model.db.AccountCstm;
 import com.currencycloud.auth.model.db.Contact;
 import com.currencycloud.auth.model.db.ContactsCstm;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -34,6 +34,10 @@ public class AuthenticationService {
 
     public AuthenticationService(){
 
+    }
+
+    public RabbitTemplate getRabbitTemplate() {
+        return rabbitTemplate;
     }
 
     /*
@@ -76,10 +80,12 @@ public class AuthenticationService {
         }
 
         // Check the security answer is correct
-        response = assertSecurityQuestionCorrect(q_no, answer, contact, cstm);
+        response = assertSecurityQuestionCorrect(q_no, answer, cstm);
         if(response.isFailed()) {
             return response.getResponseData();
         }
+
+        generateSuccessfulLoginEvent(cstm);
 
         // create successful authentication hash response
         return generateSuccessfulResponse(contact, cstm, account).getResponseData();
@@ -120,6 +126,8 @@ public class AuthenticationService {
         if(response.isFailed()) {
             return response.getResponseData();
         }
+
+        generateSuccessfulLoginEvent(cstm);
 
         // create successful authentication hash response
         return generateSuccessfulResponse(contact, cstm, account).getResponseData();
@@ -259,7 +267,7 @@ public class AuthenticationService {
     * */
     public AuthenticationResponse assertPasswordCorrect(String password, Contact contact, ContactsCstm cstm) {
         if(!cstm.assertPasswordHashMatches(password)) {
-            generateFailedLoginEvent(contact, cstm, FailedLogin.Reason.INCORRECT_PASSWORD);
+            generateFailedLoginEvent(cstm, FailedLogin.Reason.INCORRECT_PASSWORD);
             return generateFailedResponse(cstm.getLoginId(), DENIED_INVALID_SUPPLIED_CREDENTIALS, "Access denied, incorrect credentials");
         }
 
@@ -268,7 +276,7 @@ public class AuthenticationService {
 
     public AuthenticationResponse assertApiKeyCorrect(String apiKey, Contact contact, ContactsCstm cstm) {
         if(!cstm.assertApiKeyMatches(apiKey)) {
-            generateFailedLoginEvent(contact, cstm, FailedLogin.Reason.INCORRECT_API_KEY);
+            generateFailedLoginEvent(cstm, FailedLogin.Reason.INCORRECT_API_KEY);
             return generateFailedResponse(cstm.getLoginId(), DENIED_INVALID_SUPPLIED_CREDENTIALS, "Access denied, incorrect credentials");
         }
 
@@ -278,9 +286,9 @@ public class AuthenticationService {
     /*
     * Verify that the bcrypted security answer matches what we have in our database
     */
-    public AuthenticationResponse assertSecurityQuestionCorrect(int questionNumber, String answer, Contact contact, ContactsCstm cstm) {
+    public AuthenticationResponse assertSecurityQuestionCorrect(int questionNumber, String answer, ContactsCstm cstm) {
         if(!cstm.assertSecurityAnswer(questionNumber, answer)) {
-            generateFailedLoginEvent(contact, cstm, FailedLogin.Reason.INCORRECT_SECURITY_ANSWER);
+            generateFailedLoginEvent(cstm, FailedLogin.Reason.INCORRECT_SECURITY_ANSWER);
             return generateFailedResponse(cstm.getLoginId(), DENIED_INVALID_SUPPLIED_CREDENTIALS, "Access denied, incorrect credentials");
         }
 
@@ -288,12 +296,20 @@ public class AuthenticationService {
     }
 
 
-    private void generateFailedLoginEvent(Contact contact, ContactsCstm cstm, FailedLogin.Reason reason) {
+    private void generateFailedLoginEvent(ContactsCstm cstm, FailedLogin.Reason reason) {
         // deliver an amqp ping to all auth.failed queues for pickup
-        rabbitTemplate.convertAndSend(
+        getRabbitTemplate().convertAndSend(
                 AmqpRegistry.EXCHANGE_NAME_AUTHENTICATION,
                 "auth.failed",
                 new FailedLogin(cstm, Calendar.getInstance().getTime(), reason)
+        );
+    }
+
+    private void generateSuccessfulLoginEvent(ContactsCstm cstm) {
+        getRabbitTemplate().convertAndSend(
+                AmqpRegistry.EXCHANGE_NAME_AUTHENTICATION,
+                "auth.success",
+                new SuccessfulLogin(cstm, Calendar.getInstance().getTime())
         );
     }
 

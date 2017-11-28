@@ -8,6 +8,7 @@ import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistrar;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.messaging.converter.MappingJackson2MessageConverter;
@@ -15,13 +16,13 @@ import org.springframework.messaging.handler.annotation.support.DefaultMessageHa
 
 @SpringBootApplication
 @EnableRabbit
+@EnableCaching
 @ComponentScan("com.currencycloud.auth")
 public class Authenticator  implements RabbitListenerConfigurer {
 
     public static void main(String[] args) {
         SpringApplication.run(Authenticator.class, args);
     }
-
 
     @Bean
     public RabbitTemplate rabbitTemplate(final ConnectionFactory connectionFactory) {

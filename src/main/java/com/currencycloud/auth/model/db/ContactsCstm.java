@@ -55,6 +55,7 @@ public class ContactsCstm {
     @Column(name="security_question_3_c")
     private String securityQuestion3;
 
+    @Column(name="failed_attempts")
     private int failedAttempts;
 
     public String getId() {
@@ -152,6 +153,30 @@ public class ContactsCstm {
 
     public String getSecurityQuestion3() {
         return securityQuestion3;
+    }
+
+    public void setLocked(Boolean locked) {
+        this.locked = locked;
+    }
+
+    public void setLockedAt(Date lockedAt) {
+        this.lockedAt = lockedAt;
+    }
+
+    public void setLockReason(String lockReason) {
+        this.lockReason = lockReason;
+    }
+
+    public void setLastLoginAttempt(Date lastLoginAttempt) {
+        this.lastLoginAttempt = lastLoginAttempt;
+    }
+
+    public void setLastSuccessfulAttempt(Date lastSuccessfulAttempt) {
+        this.lastSuccessfulAttempt = lastSuccessfulAttempt;
+    }
+
+    public void setFailedAttempts(int failedAttempts) {
+        this.failedAttempts = failedAttempts;
     }
 }
 
