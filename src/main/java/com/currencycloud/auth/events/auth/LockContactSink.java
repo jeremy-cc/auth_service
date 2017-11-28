@@ -23,7 +23,7 @@ public class LockContactSink{
     public boolean processFailedLoginEvent(@Payload FailedLogin login) {
         System.out.println("Processed lock event: << " + login.toString() + " >>" );
 
-        ContactsCstm cstm = getContact(login);
+        ContactsCstm cstm = getContact(login.getLoginId());
 
         if(cstm.getFailedAttempts() + 1 >= maxAttempts) {
             System.out.println("Contact has exceeded grace attempts; locking");
@@ -43,8 +43,8 @@ public class LockContactSink{
         cstmRepository.save(cstm);
     }
 
-    public ContactsCstm getContact(@Payload FailedLogin login) {
-        return cstmRepository.findOne(login.getId());
+    public ContactsCstm getContact(String loginId) {
+        return cstmRepository.findOne(loginId);
     }
 }
 

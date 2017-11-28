@@ -30,7 +30,7 @@ public class LockContactSinkTest {
         login.setLoginId("test@test.com");
         login.setReason(FailedLogin.Reason.INCORRECT_PASSWORD);
 
-        given(sink.getContact("123")).willReturn(cstm);
+        given(sink.getContact(any(String.class))).willReturn(cstm);
         given(cstm.getFailedAttempts()).willCallRealMethod();
 
         when(sink.processFailedLoginEvent(any())).thenCallRealMethod();
